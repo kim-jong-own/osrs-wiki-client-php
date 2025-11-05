@@ -1,0 +1,22 @@
+services:
+
+  #PHP Service
+  osrs-wiki-client:
+    build:
+      context: .
+      dockerfile: ./.docker/Dockerfile
+    container_name: osrs-wiki-client
+    tty: true
+    environment:
+      SERVICE_NAME: osrs-wiki-client
+      SERVICE_TAGS: dev
+    working_dir: /usr/src/lib
+    volumes:
+      - ./:/usr/src/lib
+    networks:
+      - osrs-wiki-client-network
+
+#Docker Networks
+networks:
+  osrs-wiki-client-network:
+    driver: bridge
