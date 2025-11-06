@@ -19,6 +19,8 @@ class BucketQuery implements Stringable
         public readonly string $bucket,
         public readonly array $selects,
         public readonly array $wheres,
+        public readonly ?int $limit = null,
+        public ?int $offset = null,
     ) {
         //
     }
@@ -29,8 +31,17 @@ class BucketQuery implements Stringable
             $this->getOperation('bucket', $this->bucket),
             $this->getOperation('select', $this->selects),
             ...array_map(fn ($where) => $this->getOperation('where', $where), $this->wheres),
-            $this->getOperation('run')
         ];
+
+        if (isset($this->limit)) {
+            $conditions[] = $this->getOperation('limit', $this->limit);
+        }
+
+        if (isset($this->offset)) {
+            $conditions[] = $this->getOperation('offset', $this->offset);
+        }
+
+        $conditions[] = $this->getOperation('run');
 
         return implode('.', $conditions);
     }
@@ -39,7 +50,7 @@ class BucketQuery implements Stringable
     {
         $valueString = isset($value)
             ? implode(',', array_map(
-                fn ($v) => sprintf("'%s'", urlencode((string)$v)),
+                fn($v) => is_numeric($v) ? (string)$v : sprintf("'%s'", urlencode((string)$v)),
                 is_array($value) ? $value : [$value]
             ))
             : '';

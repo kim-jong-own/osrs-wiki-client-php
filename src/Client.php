@@ -15,6 +15,11 @@ use KimJongOwn\OsrsWiki\Model\RecipeSkill;
 
 class Client
 {
+    /**
+     * @var array<Recipe>|null $recipes
+     */
+    private array|null $recipes = null;
+
     public function __construct(
         private GuzzleHttpClient $http,
     ) {
@@ -140,32 +145,48 @@ class Client
      */
     public function getRecipes(): array
     {
-        $response = $this->request('GET', 'https://oldschool.runescape.wiki/api.php', [
+        if ($this->recipes !== null) {
+            return $this->recipes;
+        }
+
+        $requestOptions = [
             'query' => [
                 'format' => 'json',
                 'action' => 'bucket',
-                'query' => (new BucketQuery(
-                    bucket: 'recipe',
-                    selects: [
-                        'page_name',
-                        'page_name_sub',
-                        'uses_material',
-                        'uses_tool',
-                        'uses_facility',
-                        'is_members_only',
-                        'is_boostable',
-                        'uses_skill',
-                        'source_template',
-                        'production_json',
-                    ],
-                    wheres: [
-                        ['source_template', 'recipe'],
-                    ],
-                ))->__toString(),
             ],
-        ]);
+        ];
 
-        return array_map(function (array $recipeData) {
+        $bucketQuery = new BucketQuery(
+            bucket: 'recipe',
+            selects: [
+                'page_name',
+                'page_name_sub',
+                'uses_material',
+                'uses_tool',
+                'uses_facility',
+                'is_members_only',
+                'is_boostable',
+                'uses_skill',
+                'source_template',
+                'production_json',
+            ],
+            wheres: [
+                ['source_template', 'recipe'],
+            ],
+            limit: 500,
+            offset: 0,
+        );
+
+        $buckets = [];
+
+        do {
+            $requestOptions['query']['query'] = (string) $bucketQuery;
+            $response = $this->request('GET', 'https://oldschool.runescape.wiki/api.php', $requestOptions);
+            $buckets = array_merge($buckets, $response['bucket']);
+            $bucketQuery->offset += $bucketQuery->limit;
+        } while (count($response['bucket']) === $bucketQuery->limit);
+
+        return $this->recipes = array_map(function (array $recipeData) {
             $productionData = json_decode($recipeData['production_json'], true);
 
             $product = new RecipeProduct(
@@ -198,7 +219,38 @@ class Client
                 ticks: isset($productionData['ticks']) ? (int)$productionData['ticks'] : null,
                 members: (bool)$productionData['members'],
             );
-        }, $response['bucket']);
+        }, $buckets);
+    }
+
+    /**
+     * @return array<Recipe>
+     */
+    public function searchRecipes(string $search): array
+    {
+        return array_values(array_filter(
+            $this->getRecipes(),
+            function (Recipe $recipe) use ($search) {
+                if (stripos($recipe->product->item, $search) !== false) {
+                    return true;
+                }
+
+                if ($recipe->product->subname && stripos($recipe->product->subname, $search) !== false) {
+                    return true;
+                }
+
+                if ($recipe->product->note && stripos($recipe->product->note, $search) !== false) {
+                    return true;
+                }
+
+                foreach ($recipe->materials as $material) {
+                    if (stripos($material->item, $search) !== false) {
+                        // return true;
+                    }
+                }
+
+                return false;
+            }
+        ));
     }
 
     public function request(string $method, string $uri, array $options = []): array

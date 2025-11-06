@@ -11,7 +11,7 @@ class RecipeProduct
 {
     public function __construct(
         public readonly string $item,
-        public readonly int $quantity,
+        public readonly float $quantity,
         public readonly ?string $subname = null,
         public readonly ?string $note = null
     ) {
