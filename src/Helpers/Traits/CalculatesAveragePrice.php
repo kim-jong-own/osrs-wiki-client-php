@@ -8,7 +8,7 @@ use KimJongOwn\OsrsWiki\Model\AverageItemPrice;
 
 trait CalculatesAveragePrice
 {
-    protected function getWeightedAveragePrice(AverageItemPrice $price, int $quantity): int
+    protected function getWeightedAveragePrice(AverageItemPrice $price, float $quantity): int
     {
         $totalPrice = 0;
         $totalVolume = 0;

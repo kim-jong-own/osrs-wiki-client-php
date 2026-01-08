@@ -4,14 +4,15 @@ namespace KimJongOwn\OsrsWiki;
 
 use GuzzleHttp\Client as GuzzleHttpClient;
 use KimJongOwn\OsrsWiki\Enum\Interval;
+use KimJongOwn\OsrsWiki\Factories\RecipeFactory;
+use KimJongOwn\OsrsWiki\Helpers\ItemAliasHelper;
+use KimJongOwn\OsrsWiki\Helpers\PotionHelper;
 use KimJongOwn\OsrsWiki\Model\AverageItemPrice;
 use KimJongOwn\OsrsWiki\Model\BucketQuery;
 use KimJongOwn\OsrsWiki\Model\Item;
+use KimJongOwn\OsrsWiki\Model\ItemWithPrice;
 use KimJongOwn\OsrsWiki\Model\LatestItemPrice;
 use KimJongOwn\OsrsWiki\Model\Recipe;
-use KimJongOwn\OsrsWiki\Model\RecipeMaterial;
-use KimJongOwn\OsrsWiki\Model\RecipeProduct;
-use KimJongOwn\OsrsWiki\Model\RecipeSkill;
 
 class Client
 {
@@ -20,10 +21,31 @@ class Client
      */
     private array|null $recipes = null;
 
+    /**
+     * @var array<Item>|null $items
+     */
+    private array|null $items = null;
+
     public function __construct(
         private GuzzleHttpClient $http,
     ) {
         //
+    }
+
+    public function findItemByName(string $name): ?Item
+    {
+        foreach ($this->getItems() as $item) {
+            if (strcasecmp($item->name, $name) === 0) {
+                return $item;
+            }
+
+            $aliasName = ItemAliasHelper::getInstance()->getItemNameByAlias($name);
+            if ($aliasName !== null && strcasecmp($item->name, $aliasName) === 0) {
+                return $item;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -31,9 +53,13 @@ class Client
      */
     public function getItems(): array
     {
+        if ($this->items !== null) {
+            return $this->items;
+        }
+
         $responseData = $this->request('GET', 'https://prices.runescape.wiki/api/v1/osrs/mapping');
 
-        return array_map(function ($item) {
+        return $this->items = array_map(function ($item) {
             return new Item(
                 id: $item['id'],
                 name: $item['name'],
@@ -46,6 +72,36 @@ class Client
                 geLimit: $item['limit'] ?? null,
             );
         }, $responseData);
+    }
+
+    /**
+     * @return ItemWithPrice[]
+     */
+    public function searchItemsWithPrices(string $search, Interval $interval = Interval::ONE_HOUR): array
+    {
+        $itemsWithPrices = [];
+        $items = [];
+
+        foreach ($this->getItems() as $item) {
+            if (stripos($item->name, $search) !== false) {
+                $items[$item->id] = $item;
+            }
+        }
+
+        if ($items) {
+            $prices = $this->getAveragePrices($interval);
+
+            foreach ($prices as $price) {
+                if (isset($items[$price->itemId])) {
+                    $itemsWithPrices[] = new ItemWithPrice(
+                        item: $items[$price->itemId],
+                        averagePrice: $price,
+                    );
+                }
+            }
+        }
+
+        return $itemsWithPrices;
     }
 
     /**
@@ -93,7 +149,7 @@ class Client
      */
     public function getAverage24hPrices(): array
     {
-        return $this->getAveragePrices(Interval::DAY);
+        return $this->getAveragePrices(Interval::ONE_DAY);
     }
 
     /**
@@ -186,40 +242,14 @@ class Client
             $bucketQuery->offset += $bucketQuery->limit;
         } while (count($response['bucket']) === $bucketQuery->limit);
 
-        return $this->recipes = array_map(function (array $recipeData) {
-            $productionData = json_decode($recipeData['production_json'], true);
-
-            $product = new RecipeProduct(
-                item: $productionData['output']['name'],
-                quantity: $productionData['output']['quantity'],
-                subname: $productionData['output']['subtxt'] ?? null,
-                note: $productionData['output']['quantitynote'] ?? null,
-            );
-            $materials = array_map(function (array $materialData) {
-                return new RecipeMaterial(
-                    item: $materialData['name'],
-                    quantity: (int)$materialData['quantity'],
-                );
-            }, $productionData['materials'] ?? []);
-            $skills = array_map(function (array $skillData) {
-                return new RecipeSkill(
-                    skill: $skillData['name'],
-                    level: (int)$skillData['level'],
-                    experience: (float)$skillData['experience'],
-                    boostable: isset($skillData['boostable']) && $skillData['boostable'] === 'Yes',
-                );
-            }, $productionData['skills'] ?? []);
-
-            return new Recipe(
-                product: $product,
-                materials: $materials,
-                skills: $skills,
-                tools: isset($productionData['tools']) ? explode(', ', $productionData['tools']) : [],
-                facilities: isset($productionData['facilities']) ? explode(', ', $productionData['facilities']) : [],
-                ticks: isset($productionData['ticks']) ? (int)$productionData['ticks'] : null,
-                members: (bool)$productionData['members'],
-            );
+        $recipes = array_map(function (array $recipeData) {
+            return (new RecipeFactory())->fromArray(json_decode($recipeData['production_json'], true));
         }, $buckets);
+
+        return $this->recipes = array_merge(
+            $recipes,
+            (new PotionHelper($this->getItems()))->getDecantRecipes(),
+        );
     }
 
     /**
@@ -234,6 +264,11 @@ class Client
                     return true;
                 }
 
+                $productAlias = ItemAliasHelper::getInstance()->getItemNameByAlias($recipe->product->item);
+                if ($productAlias && stripos($productAlias, $search) !== false) {
+                    return true;
+                }
+
                 if ($recipe->product->subname && stripos($recipe->product->subname, $search) !== false) {
                     return true;
                 }
@@ -244,7 +279,12 @@ class Client
 
                 foreach ($recipe->materials as $material) {
                     if (stripos($material->item, $search) !== false) {
-                        // return true;
+                        return true;
+                    }
+
+                    $materialAlias = ItemAliasHelper::getInstance()->getItemNameByAlias($material->item);
+                    if ($materialAlias && stripos($materialAlias, $search) !== false) {
+                        return true;
                     }
                 }
 

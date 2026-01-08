@@ -15,6 +15,8 @@ class RecipeProfitMargin
         public int $productPrice,
         public int $tax,
         public int $margin,
+        public float $marginPercent,
+        public int $margin_per_hour,
         public int $marginPerUnit,
         public array $averagePrices,
     ) {

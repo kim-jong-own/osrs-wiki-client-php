@@ -7,8 +7,7 @@ namespace KimJongOwn\OsrsWiki\Model;
 class RecipeSkill
 {
     public function __construct(
-        public readonly string $skill,
-        public readonly int $level,
+        public readonly SkillRequirement $requirement,
         public readonly float $experience,
         public readonly bool $boostable
     ) {

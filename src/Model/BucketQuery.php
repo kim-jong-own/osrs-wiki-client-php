@@ -18,7 +18,7 @@ class BucketQuery implements Stringable
     public function __construct(
         public readonly string $bucket,
         public readonly array $selects,
-        public readonly array $wheres,
+        public readonly array $wheres = [],
         public readonly ?int $limit = null,
         public ?int $offset = null,
     ) {
